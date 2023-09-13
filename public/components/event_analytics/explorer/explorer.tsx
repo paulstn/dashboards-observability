@@ -32,6 +32,7 @@ import React, {
 } from 'react';
 import { batch, useDispatch, useSelector } from 'react-redux';
 import _ from 'lodash';
+import moment from 'moment';
 import { LogExplorerRouterContext } from '..';
 import {
   CREATE_TAB_PARAM,
@@ -118,6 +119,8 @@ import { Sidebar } from './sidebar';
 import { TimechartHeader } from './timechart_header';
 import { ExplorerVisualizations } from './visualizations';
 import { CountDistribution } from './visualizations/count_distribution';
+import { calcAutoIntervalLessThan, calcAutoIntervalNear } from './time_buckets/calc_auto_interval';
+import { convertDurationToNormalizedOpenSearchInterval } from './time_buckets/calc_opensearch_interval';
 
 export const Explorer = ({
   pplService,
@@ -213,23 +216,50 @@ export const Explorer = ({
   const findAutoInterval = (start: string = '', end: string = '') => {
     const momentStart = dateMath.parse(start)!;
     const momentEnd = dateMath.parse(end, { roundUp: true })!;
-    const diffSeconds = momentEnd.unix() - momentStart.unix();
-    let minInterval = 'y';
+    const difference = momentEnd.valueOf() - momentStart.valueOf();
+    const duration = moment.duration(difference, 'ms');
 
-    // less than 1 second
-    if (diffSeconds <= 1) minInterval = 'ms';
-    // less than 2 minutes
-    else if (diffSeconds <= 60 * 2) minInterval = 's';
-    // less than 2 hours
-    else if (diffSeconds <= 3600 * 2) minInterval = 'm';
-    // less than 2 days
-    else if (diffSeconds <= 86400 * 2) minInterval = 'h';
-    // less than 1 month
-    else if (diffSeconds <= 86400 * 31) minInterval = 'd';
-    // less than 3 months
-    else if (diffSeconds <= 86400 * 93) minInterval = 'w';
-    // less than 1 year
-    else if (diffSeconds <= 86400 * 366) minInterval = 'M';
+    let interval = calcAutoIntervalNear(uiSettingsService.get('histogram:barTarget'), difference);
+
+    // // check to see if the interval should be scaled, and scale it if so
+    // const maybeScaleInterval = (interval: moment.Duration) => {
+    const maxLength: number = uiSettingsService.get('histogram:maxBars');
+    const approxLen = difference / Number(interval);
+
+    let scaled;
+
+    if (approxLen > maxLength) {
+      scaled = calcAutoIntervalLessThan(maxLength, difference);
+
+      if (+scaled !== +interval) {
+        interval = Object.assign(scaled, {
+          preScaled: interval,
+          scale: Number(interval) / Number(scaled),
+          scaled: true,
+        });
+      }
+    }
+
+    const prettyUnits = moment.normalizeUnits(
+      convertDurationToNormalizedOpenSearchInterval(interval).unit
+    );
+
+    const minInterval = prettyUnits;
+
+    // // less than 1 second
+    // if (difference <= 1 * 1000) minInterval = 'ms';
+    // // less than 2 minutes
+    // else if (difference <= 60 * 2 * 1000) minInterval = 's';
+    // // less than 2 hours
+    // else if (difference <= 3600 * 2 * 1000) minInterval = 'm';
+    // // less than 2 days
+    // else if (difference <= 86400 * 2 * 1000) minInterval = 'h';
+    // // less than 1 month
+    // else if (difference <= 86400 * 31 * 1000) minInterval = 'd';
+    // // less than 3 months
+    // else if (difference <= 86400 * 93 * 1000) minInterval = 'w';
+    // // less than 1 year
+    // else if (difference <= 86400 * 366 * 1000) minInterval = 'M';
 
     setTimeIntervalOptions([
       { text: 'Auto', value: 'auto_' + minInterval },
